@@ -1,0 +1,9 @@
+python-dotenv
+openai
+fastapi
+uvicorn
+motor
+passlib
+bcrypt==4.1.2
+python-jose
+python-multipart

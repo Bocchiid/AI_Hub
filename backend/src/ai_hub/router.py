@@ -1,6 +1,6 @@
 # src/ai_hub/router.py
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from . import schemas as ai_hub_schemas
 from . import model as ai_hub_model
 
@@ -36,4 +36,43 @@ async def get_ai_apps_by_category(category: str):
 
     return ai_hub_schemas.AIHubResponse(
         items = [ai_hub_schemas.AIExternalLink(**app) for app in ai_apps]
+    )
+
+
+@router.post("/add", response_model = ai_hub_schemas.AIAddResponse)
+async def add_new_ai_hub(ai_add_request_body: ai_hub_schemas.AIAddRequestBody):
+    """
+    添加新的 AI 外部链接
+    """
+
+    res = await ai_hub_model.add_ai_link(ai_add_request_body)
+
+    return ai_hub_schemas.AIAddResponse(
+        message = res
+    )
+
+
+@router.post("/icon/upload", response_model = ai_hub_schemas.AIIconUploadResponse)
+async def upload_ai_icon(file: UploadFile = File(...)):
+    """
+    上传 AI 图标文件
+    """
+
+    icon_url = await ai_hub_model.upload_icon(file)
+
+    return ai_hub_schemas.AIIconUploadResponse(
+        icon_url = icon_url
+    )
+
+
+@router.post("/delete", response_model = ai_hub_schemas.AIDeleteResponse)
+async def delete_ai_hub(delete_request: ai_hub_schemas.AIDeleteRequest):
+    """
+    根据 _id 删除指定的 AI 链接 (POST 方式)
+    """
+
+    res = await ai_hub_model.delete_ai_link(delete_request.mongo_id)
+
+    return ai_hub_schemas.AIDeleteResponse(
+        message = res
     )

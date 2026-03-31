@@ -15,11 +15,12 @@ async def query_user_by_name(username: str):
     return res
 
 
-async def insert_user(username: str, hashed_password: str):
+async def insert_user(username: str, hashed_password: str, role: str):
     new_doc = {
         '_id': obj(),
         'username': username,
-        'password': hashed_password
+        'password': hashed_password,
+        'role': role
     }
 
     await UserCollection.insert_one(new_doc)

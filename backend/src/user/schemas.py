@@ -1,11 +1,19 @@
 # src/user/schemas.py
 
 from pydantic import BaseModel
+from enum import Enum
+from typing import Optional
+
+
+class UserRole(str, Enum):
+    USER = "user"
+    ADMIN = "administrator"
 
 
 class UserRegisterRequest(BaseModel):
     username: str
     password: str
+    role: Optional[UserRole] = UserRole.USER
 
 
 class UserRegisterResponse(BaseModel):

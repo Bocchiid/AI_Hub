@@ -18,7 +18,11 @@ async def register_user(user_register_request: user_schemas.UserRegisterRequest)
         )
 
     hashed_password = hash.hash_password(user_register_request.password)
-    await user_repo.insert_user(user_register_request.username, hashed_password)
+    await user_repo.insert_user(
+        user_register_request.username, 
+        hashed_password, 
+        user_register_request.role.value
+    )
     return "User registered successfully"
 
 

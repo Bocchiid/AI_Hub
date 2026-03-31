@@ -1,8 +1,9 @@
 # src/ai_hub/router.py
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, UploadFile, Depends
 from . import schemas as ai_hub_schemas
 from . import model as ai_hub_model
+from src.utils import auth
 
 
 from typing import Optional
@@ -39,10 +40,10 @@ async def get_ai_apps_by_category(category: str):
     )
 
 
-@router.post("/add", response_model = ai_hub_schemas.AIAddResponse)
+@router.post("/add", response_model = ai_hub_schemas.AIAddResponse, dependencies=[Depends(auth.admin_required)])
 async def add_new_ai_hub(ai_add_request_body: ai_hub_schemas.AIAddRequestBody):
     """
-    添加新的 AI 外部链接
+    添加新的 AI 外部链接 (仅限管理员)
     """
 
     res = await ai_hub_model.add_ai_link(ai_add_request_body)
@@ -52,10 +53,10 @@ async def add_new_ai_hub(ai_add_request_body: ai_hub_schemas.AIAddRequestBody):
     )
 
 
-@router.post("/icon/upload", response_model = ai_hub_schemas.AIIconUploadResponse)
+@router.post("/icon/upload", response_model = ai_hub_schemas.AIIconUploadResponse, dependencies=[Depends(auth.admin_required)])
 async def upload_ai_icon(file: UploadFile = File(...)):
     """
-    上传 AI 图标文件
+    上传 AI 图标文件 (仅限管理员)
     """
 
     icon_url = await ai_hub_model.upload_icon(file)
@@ -65,10 +66,10 @@ async def upload_ai_icon(file: UploadFile = File(...)):
     )
 
 
-@router.post("/delete", response_model = ai_hub_schemas.AIDeleteResponse)
+@router.post("/delete", response_model = ai_hub_schemas.AIDeleteResponse, dependencies=[Depends(auth.admin_required)])
 async def delete_ai_hub(delete_request: ai_hub_schemas.AIDeleteRequest):
     """
-    根据 _id 删除指定的 AI 链接 (POST 方式)
+    根据 _id 删除指定的 AI 链接 (仅限管理员)
     """
 
     res = await ai_hub_model.delete_ai_link(delete_request.mongo_id)

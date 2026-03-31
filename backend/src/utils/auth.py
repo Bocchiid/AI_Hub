@@ -4,14 +4,14 @@ from src.core.config import SECRET_KEY, ALGORITHM
 from datetime import datetime, timezone
 from jose import JWTError, jwt
 from src.database import user_repo
+from src.user import schemas as user_schemas
 
 
 # get token from url = '/login'
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-async def get_current_user_id(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     """
-    从 Authorization 头部提取 Bearer token，
     验证并返回当前用户信息。
     """
 
@@ -38,4 +38,30 @@ async def get_current_user_id(token: str = Depends(oauth2_scheme)):
     if queried_user is None:
         raise credentials_exception
 
-    return user_id
+    return queried_user
+
+
+async def get_current_user_id(user: dict = Depends(get_current_user)):
+    """
+    验证并返回当前用户 ID。
+    """
+    return user.get('_id')
+
+
+class RoleChecker:
+    def __init__(self, allowed_roles: list[user_schemas.UserRole]):
+        self.allowed_roles = allowed_roles
+
+    async def __call__(self, user: dict = Depends(get_current_user)):
+        user_role = user.get("role", user_schemas.UserRole.USER)
+        if user_role not in self.allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Operation not permitted"
+            )
+        return user
+
+
+# 快捷依赖
+admin_required = RoleChecker([user_schemas.UserRole.ADMIN])
+user_required = RoleChecker([user_schemas.UserRole.USER, user_schemas.UserRole.ADMIN])

@@ -6,24 +6,15 @@ from .database.mongodb import test_connection
 from .user.router import router as user_router
 from .deepseek.router import router as deepseek_router
 from .doubao.router import router as doubao_router
-from .category.router import router as category_router
-from .ai_link.router import router as ai_link_router
-from .category.model import init_default_category
+from .ai_hub.router import router as ai_hub_router
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 
-async def startup_events():
-    # 1. 测试 MongoDB 连接
-    await test_connection()
-    # 2. 初始化默认分类 (Default)
-    await init_default_category()
-
-
 app = FastAPI(
     title = 'LLM',
-    on_startup=[startup_events]
+    on_startup=[test_connection]
 )
 
 # 挂载静态文件目录
@@ -38,9 +29,10 @@ app.include_router(
     doubao_router,
     prefix='/doubao'
 )
-app.include_router(category_router)
-# app.include_router(ai_link_router)
-
+app.include_router(
+    ai_hub_router,
+    prefix='/ai_hub'
+)
 
 app.add_middleware(
     CORSMiddleware,

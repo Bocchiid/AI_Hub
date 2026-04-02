@@ -52,19 +52,19 @@ class ChatHistoryResponse(BaseModel):
         from_attributes = True
 
 
-class ChatGenerateImageRequestBody(BaseModel):
+class PromptToImageRequestBody(BaseModel):
     prompt: str
     conversation_id: Optional[str] = None
 
 
-class ChatGenerateImageRequest(BaseModel):
+class PromptToImageRequest(BaseModel):
     prompt: str
     user_id: str
     conversation_id: Optional[str] = None
 
 
-class ChatGenerateImageResponse(BaseModel):
-    img_url: str
+class PromptToImageResponse(BaseModel):
+    img_urls: List[str]
     conversation_id: Optional[str] = None
 
     class Config:

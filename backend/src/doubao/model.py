@@ -153,43 +153,88 @@ async def get_chat_history(chat_history_query: doubao_schemas.ChatHistoryQuery):
     return title, chat_history
 
 
-async def generate_chat_generate_single_image_response(chat_generate_single_image_request: doubao_schemas.ChatGenerateImageRequest):
-    if not chat_generate_single_image_request.conversation_id:
-        chat_generate_single_image_request.conversation_id = obj()
-        title = await generate_chat_title(chat_generate_single_image_request.prompt)
+async def generate_prompt_to_image_response(prompt_to_image_request: doubao_schemas.PromptToImageRequest):
+    if not prompt_to_image_request.conversation_id:
+        prompt_to_image_request.conversation_id = obj()
+        title = await generate_chat_title(prompt_to_image_request.prompt)
 
     doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection,
-                                                            chat_generate_single_image_request.user_id,
-                                                            chat_generate_single_image_request.conversation_id)
+                                                            prompt_to_image_request.user_id,
+                                                            prompt_to_image_request.conversation_id)
     if doc:
         doc_data = doc[0]
         history_messages = doc_data.get('messages')
         title = doc_data.get('title')
     else:
         history_messages = []
-    history_messages.append({"role": "user", "content": chat_generate_single_image_request.prompt})
+    
+    prompt = prompt_to_image_request.prompt
+    history_messages.append({"role": "user", "content": prompt})
 
-    single_image_response = await client.images.generate(
-        # Replace with Model ID
-        model = DOUBAO_IMAGE_MODEL,
-        prompt = chat_generate_single_image_request.prompt,
-        size = "2K",
-        response_format = "url",
-        extra_body={
-            "watermark": False,
-        },
-    )
-    reply = single_image_response.data[0].url
+    # 使用 AI 判断是否需要生成多图
+    # 构造判断指令
+    judge_prompt = f"请判断用户的输入是否包含生成多张、几张、批量、几份或明确张数（大于1）的要求。注意：单次生成最多支持 4 张图。如果是多图需求，仅输出 'multi'；否则仅输出 'single'。用户输入：'{prompt}'"
+    
+    try:
+        judge_response = await client.chat.completions.create(
+            model = DOUBAO_MODEL,
+            messages = [{"role": "user", "content": judge_prompt}],
+            temperature = 0
+        )
+        decision = judge_response.choices[0].message.content.strip().lower()
+        n = 4 if 'multi' in decision else 1
+    except Exception as e:
+        # 降级处理：如果 AI 判断失败，回退到简单的关键词检测
+        print(f"AI 判断失败: {e}")
+        multi_keywords = ["多图", "几张", "多张", "4张", "四张", "批量", "两张", "三张", "2张", "3张", "一些"]
+        n = 4 if any(k in prompt for k in multi_keywords) else 1
+
+    img_urls = []
+    if n > 1:
+        # 参考官网 SeeDream 2.0 连贯插画/多图流式生成模式
+        image_response = await client.images.generate(
+            model = DOUBAO_IMAGE_MODEL,
+            prompt = prompt,
+            size = "2K",
+            response_format = "url",
+            stream = True,
+            extra_body={
+                "watermark": False,
+                "sequential_image_generation": "auto",
+                "sequential_image_generation_options": {
+                    "max_images": n
+                },
+            },
+        )
+        async for event in image_response:
+            if event and event.type == "image_generation.partial_succeeded":
+                if event.url:
+                    img_urls.append(event.url)
+    else:
+        # 普通单图生成
+        single_res = await client.images.generate(
+            model = DOUBAO_IMAGE_MODEL,
+            prompt = prompt,
+            size = "2K",
+            n = 1,
+            response_format = "url",
+            extra_body={
+                "watermark": False,
+            },
+        )
+        img_urls = [data.url for data in single_res.data]
+    
+    # 存入历史记录时，将URL以换行符连接
+    reply_content = "\n".join(img_urls)
 
     history_messages.append({
-        "role": "assistant", "content": reply
+        "role": "assistant", "content": reply_content
     })
 
     await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
-                                          chat_generate_single_image_request.user_id,
-                                          chat_generate_single_image_request.conversation_id,
+                                          prompt_to_image_request.user_id,
+                                          prompt_to_image_request.conversation_id,
                                           title,
                                           history_messages)
 
-    print(reply)
-    return reply
+    return img_urls

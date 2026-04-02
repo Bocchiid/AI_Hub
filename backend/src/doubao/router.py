@@ -80,18 +80,18 @@ async def get_chat_history(conversation_id: str,
     )
 
 
-# chat to generate single image without stream response
-@router.post("/chat-generate-single-image", response_model = doubao_schemas.ChatGenerateImageResponse)
-async def create_chat_generate_single_image_request(request_body: doubao_schemas.ChatGenerateImageRequestBody,
+# prompt to image without stream response
+@router.post("/prompt-to-image", response_model = doubao_schemas.PromptToImageResponse)
+async def create_prompt_to_image_request(request_body: doubao_schemas.PromptToImageRequestBody,
                                     user_id: str = Depends(get_current_user_id)):
-    chat_generate_single_image_request = doubao_schemas.ChatGenerateImageRequest(
+    prompt_to_image_request = doubao_schemas.PromptToImageRequest(
         prompt = request_body.prompt,
         user_id = user_id,
         conversation_id = request_body.conversation_id
     )
 
-    response = await doubao_model.generate_chat_generate_single_image_response(chat_generate_single_image_request)
-    return doubao_schemas.ChatGenerateImageResponse(
-        img_url = response,
-        conversation_id = chat_generate_single_image_request.conversation_id if chat_generate_single_image_request.conversation_id else None
+    response = await doubao_model.generate_prompt_to_image_response(prompt_to_image_request)
+    return doubao_schemas.PromptToImageResponse(
+        img_urls = response,
+        conversation_id = prompt_to_image_request.conversation_id if prompt_to_image_request.conversation_id else None
     )

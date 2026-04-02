@@ -13,10 +13,18 @@ async def insert_category(collection: AsyncIOMotorCollection, category_data: dic
 
 async def delete_category(collection: AsyncIOMotorCollection, _id: str):
     """
-    根据 _id 删除分类
+    根据 _id 删除单个分类
     """
     result = await collection.delete_one({"_id": ObjectId(_id)})
     return result.deleted_count > 0
+
+
+async def delete_categories(collection: AsyncIOMotorCollection, ids: list[str]):
+    """
+    根据 ID 列表批量删除分类
+    """
+    result = await collection.delete_many({"_id": {"$in": [ObjectId(i) for i in ids]}})
+    return result.deleted_count
 
 
 async def update_category(collection: AsyncIOMotorCollection, _id: str, update_data: dict):
@@ -41,10 +49,17 @@ async def update_item_order(collection: AsyncIOMotorCollection, _id: str, new_or
 
 async def move_ai_links_to_category(collection: AsyncIOMotorCollection, old_category_id: str, new_category_id: str):
     """
-    批量将某个分类下的所有 AI 链接转移到新分类
+    单个分类下的所有 AI 链接转移到新分类
+    """
+    await move_ai_links_batch(collection, [old_category_id], new_category_id)
+
+
+async def move_ai_links_batch(collection: AsyncIOMotorCollection, old_category_ids: list[str], new_category_id: str):
+    """
+    批量将多个分类下的所有 AI 链接转移到新分类
     """
     await collection.update_many(
-        {"category_id": old_category_id},
+        {"category_id": {"$in": old_category_ids}},
         {"$set": {"category_id": new_category_id}}
     )
 
@@ -72,6 +87,13 @@ async def query_category(collection: AsyncIOMotorCollection, filter_query: dict)
     if doc:
         doc['_id'] = str(doc['_id'])
     return doc
+
+
+async def query_category_by_name(collection: AsyncIOMotorCollection, name: str):
+    """
+    根据名称查询单个分类
+    """
+    return await query_category(collection, {"name": name})
 
 
 async def query_max_order(collection: AsyncIOMotorCollection, filter_query: dict = None):

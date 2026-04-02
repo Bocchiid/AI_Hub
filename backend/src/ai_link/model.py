@@ -3,112 +3,138 @@
 from . import schemas as ai_link_schemas
 from src.database.mongodb import db
 from src.database import ai_link_repo, category_repo
-from fastapi import HTTPException, UploadFile
 from src.utils import tool
+from fastapi import HTTPException
+from bson import ObjectId
 
-
+# --- Base Configuration ---
 AIHubCollection = db['AIHub']
 CategoryCollection = db['Category']
 
 
-async def upload_icon(file: UploadFile):
+async def add_ai_link(ai_request: ai_link_schemas.AILinkAddRequest):
     """
-    挑选目录处理图标上传业务逻辑
+    添加新 AI 链接
     """
-    icon_url = await tool.save_upload_file(
-        file = file,
-        destination_dir = "static/icons"
+    # 0. 在该分类下查重
+    existing = await ai_link_repo.query_ai_link_by_name(
+        AIHubCollection, ai_request.name, ai_request.category_id
     )
-    return icon_url
+    if existing:
+        raise HTTPException(status_code=400, detail="AI link name already exists in this category")
 
-
-# --- AI Link Services Logic ---
-
-async def get_ai_links(category_id: str = None):
-    """
-    挑选目录获取 AI 链接（支持按分类 ID 筛选）
-    """
-    res = await ai_link_repo.query_ai_links(AIHubCollection, category_id)
-    return res
-
-
-async def get_grouped_ai_hub():
-    """
-    获取分组后的 AI 应用：按 Category 排序，每个 Category 下包含其 AI 链接
-    """
-    categories = await category_repo.query_categories(CategoryCollection)
+    # 1. 获取最大排序 (按分类)
+    max_order = await ai_link_repo.query_max_order(AIHubCollection, {"category_id": ai_request.category_id})
     
-    result = []
-    for category in categories:
-        # 获取该分类下的所有链接
-        links = await get_ai_links(str(category['_id']))
-        result.append({
-            "category": category,
-            "items": links
-        })
+    # 2. 组装文档
+    new_ai_document = ai_request.model_dump()
+    new_ai_document['order'] = max_order + 1
     
-    return result
+    await ai_link_repo.insert_ai_link(AIHubCollection, new_ai_document)
+    return "AI link added successfully"
 
 
-async def add_ai_link(ai_data: ai_link_schemas.AILinkAddRequestBody):
+async def delete_ai_link(ai_id: str):
     """
-    挑选目录向数据库添加新的 AI 链接
+    删除单个 AI 链接
     """
-    # 验证分类是否存在
-    category = await category_repo.query_category_by_id(CategoryCollection, ai_data.category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+    return await batch_delete_ai_links([ai_id])
 
-    # 获取当前分类下最大的 order
-    max_order = await ai_link_repo.query_max_order(AIHubCollection, {"category_id": ai_data.category_id})
 
-    # 构造文档
-    new_doc = ai_data.model_dump()
-    new_doc['order'] = max_order + 1
+async def update_ai_link(ai_id: str, update_data: dict):
+    """
+    更新 AI 链接
+    """
+    filtered_update_data = {k: v for k, v in update_data.items() if v is not None}
+    if not filtered_update_data:
+        return "No fields to update"
 
-    # 存储到数据库
-    await ai_link_repo.insert_ai_link(AIHubCollection, new_doc)
+    # 1. 如果更新了名字或分类，需要重新查重
+    target_ai = await ai_link_repo.query_ai_link_by_id(AIHubCollection, ai_id)
+    if not target_ai:
+        raise HTTPException(status_code=404, detail="AI link not found")
 
-    return 'AI Link added successfully'
+    new_name = filtered_update_data.get("name", target_ai["name"])
+    new_cat_id = filtered_update_data.get("category_id", target_ai["category_id"])
+
+    if "name" in filtered_update_data or "category_id" in filtered_update_data:
+        existing = await ai_link_repo.query_ai_link_by_name(AIHubCollection, new_name, new_cat_id)
+        if existing and str(existing["_id"]) != ai_id:
+            raise HTTPException(status_code=400, detail="AI link name already exists in target category")
+
+    await ai_link_repo.update_ai_link(AIHubCollection, ai_id, filtered_update_data)
+    return "AI link updated successfully"
+
+
+async def get_ai_links(filter_query: dict = None):
+    """
+    通用查询 AI 链接 (保持参数为原始字典/字符串)
+    """
+    if filter_query is None:
+        filter_query = {}
+    else:
+        filter_query = filter_query.copy()
+
+    # 兼容处理：将 mongo_id 统一转换为 _id 字符串
+    if "mongo_id" in filter_query:
+        filter_query["_id"] = filter_query.pop("mongo_id")
+            
+    return await ai_link_repo.query_ai_links_by_filter(AIHubCollection, filter_query)
 
 
 async def swap_ai_links_order(id_1: str, id_2: str):
     """
     交换两个 AI 链接的顺序
     """
-    link1 = await ai_link_repo.query_ai_link_by_id(AIHubCollection, id_1)
-    link2 = await ai_link_repo.query_ai_link_by_id(AIHubCollection, id_2)
+    ai1 = await ai_link_repo.query_ai_link_by_id(AIHubCollection, id_1)
+    ai2 = await ai_link_repo.query_ai_link_by_id(AIHubCollection, id_2)
     
-    if not link1 or not link2:
-        raise HTTPException(status_code=404, detail="AI Link not found")
+    if not ai1 or not ai2:
+        raise HTTPException(status_code=404, detail="AI link not found")
     
-    order1 = link1.get('order', 0)
-    order2 = link2.get('order', 0)
-    
-    await ai_link_repo.update_item_order(AIHubCollection, id_1, order2)
-    await ai_link_repo.update_item_order(AIHubCollection, id_2, order1)
-    
+    await ai_link_repo.update_item_order(AIHubCollection, id_1, ai2.get('order', 0))
+    await ai_link_repo.update_item_order(AIHubCollection, id_2, ai1.get('order', 0))
     return "Order swapped successfully"
 
 
-async def delete_ai_link(ai_id: str):
+async def batch_delete_ai_links(ai_ids: list[str]):
     """
-    挑选目录根据 _id 删除 AI 链接，并同步删除本地图标文件
+    批量删除 AI 链接 (包含图标下线)
     """
-    # 1. 先查出该链接的信息，获取 icon_url
-    ai_link = await ai_link_repo.query_ai_link_by_id(AIHubCollection, ai_id)
-    if not ai_link:
-        raise HTTPException(status_code=404, detail="AI Link not found")
+    # 1. 查找并删除物理图标
+    target_links = await ai_link_repo.query_ai_links_by_filter(
+        AIHubCollection, {"_id": {"$in": [ObjectId(i) for i in ai_ids]}}
+    )
+    for link in target_links:
+        if link.get("icon_url"):
+            tool.remove_file(link["icon_url"])
 
-    # 2. 从数据库删除记录
-    success = await ai_link_repo.delete_ai_link(AIHubCollection, ai_id)
+    # 2. 数据库删除
+    await ai_link_repo.delete_ai_links_batch(AIHubCollection, ai_ids)
+    return f"Successfully deleted {len(ai_ids)} AI links"
 
-    if success:
-        # 3. 数据库删除成功后，物理删除本地文件
-        icon_url = ai_link.get('icon_url')
-        if icon_url:
-            tool.delete_local_file(icon_url)
-        return 'AI Link deleted successfully'
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete database record")
 
+async def batch_move_ai_links(ai_ids: list[str], new_category_id: str):
+    """
+    批量移动 AI 链接
+    """
+    await ai_link_repo.batch_move_ai_links(AIHubCollection, ai_ids, new_category_id)
+    return f"Successfully moved {len(ai_ids)} AI links"
+
+
+async def get_ai_hubs():
+    """
+    获取 AI Hub 聚合数据 (分类 -> AI 列表)
+    """
+    # 1. 获取所有分类
+    categories = await category_repo.query_categories(CategoryCollection)
+    
+    result = []
+    for cat in categories:
+        # 2. 获取该分类下所有 AI 链接
+        links = await ai_link_repo.query_ai_links(AIHubCollection, str(cat["_id"]))
+        result.append({
+            "category": cat,
+            "items": links
+        })
+    return result

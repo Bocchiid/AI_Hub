@@ -8,7 +8,7 @@ from fastapi import UploadFile
 # --- Base Models ---
 
 class Category(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
     mongo_id: str = Field(alias="_id")
     name: str
@@ -76,6 +76,10 @@ class CategoryReorderRequest(BaseModel):
     id_2: str
 
 
+class CategoryBatchDeleteRequest(BaseModel):
+    mongo_ids: List[str] = Field(alias="mongo_ids")
+
+
 # --- Responses ---
 
 class MsgResponse(BaseModel):
@@ -110,4 +114,8 @@ class CategoryIdQueryResponse(CategoryQueryResponse):
 
 
 class CategoryReorderResponse(MsgResponse):
-    pass  
+    pass 
+
+
+class CategoryBatchDeleteResponse(MsgResponse):
+    pass

@@ -16,6 +16,11 @@ async def add_category(category_request: category_schemas.CategoryCreateRequest)
     """
     添加新分类 (逻辑解耦：由 Router 预先处理好 icon_url)
     """
+    # 0. 查重
+    existing = await category_repo.query_category_by_name(CategoryCollection, category_request.name)
+    if existing:
+        raise HTTPException(status_code=400, detail="Category name already exists")
+
     # 1. 获取最大排序
     max_order = await category_repo.query_max_order(CategoryCollection)
     
@@ -31,32 +36,7 @@ async def delete_category(category_id: str):
     """
     根据 _id 删除分类，并将子项移动到 Default 分类，同时删除磁盘上的图标文件
     """
-    # 1. 查询目标分类是否存在
-    target_category = await category_repo.query_category(CategoryCollection, {"_id": ObjectId(category_id)})
-    if not target_category:
-        raise HTTPException(status_code=404, detail="Category not found")
-    
-    # 2. 禁止删除 Default 分类
-    if target_category.get('name') == "Default":
-        raise HTTPException(status_code=400, detail="Cannot delete Default category")
-
-    # 3. 寻找或验证 Default 分类
-    default_category = await category_repo.query_category(CategoryCollection, {"name": "Default"})
-    if not default_category:
-        raise HTTPException(status_code=500, detail="Default category not initialized")
-
-    # 4. 执行批量转移应用
-    await category_repo.move_ai_links_to_category(AIHubCollection, category_id, str(default_category['_id']))
-
-    # 5. 删除物理磁盘上的图标文件
-    icon_url = target_category.get("icon_url")
-    if icon_url:
-        tool.remove_file(icon_url)
-
-    # 6. 删除数据库记录
-    await category_repo.delete_category(CategoryCollection, category_id)
-
-    return 'Category deleted and items moved to Default'
+    return await batch_delete_categories([category_id])
 
 
 async def update_category(category_id: str, update_data: dict):
@@ -67,6 +47,13 @@ async def update_category(category_id: str, update_data: dict):
     filtered_update_data = {k: v for k, v in update_data.items() if v is not None}
     if not filtered_update_data:
         return "No fields to update"
+
+    # 1. 查重
+    new_name = filtered_update_data.get("name")
+    if new_name:
+        existing = await category_repo.query_category_by_name(CategoryCollection, new_name)
+        if existing and str(existing["_id"]) != category_id:
+            raise HTTPException(status_code=400, detail="Category name already exists")
     
     await category_repo.update_category(CategoryCollection, category_id, filtered_update_data)
     return "Category updated successfully"
@@ -109,11 +96,14 @@ async def init_default_category():
     """
     检查并初始化 Default 分类 (供系统启动时调用)
     """
-    default_category = await category_repo.query_category(CategoryCollection, {"name": "Default"})
+    # 0. 为 name 字段建立唯一索引 (应对高并发并强制数据完整性)
+    await CategoryCollection.create_index("name", unique=True)
+    
+    default_category = await category_repo.query_category(CategoryCollection, {"name": "默认分类"})
     if not default_category:
         max_order = await category_repo.query_max_order(CategoryCollection)
         new_category_document = {
-            "name": "Default",
+            "name": "默认分类",
             "description": "默认分类",
             "order": max_order + 1,
             "icon_url": None
@@ -121,3 +111,40 @@ async def init_default_category():
         await category_repo.insert_category(CategoryCollection, new_category_document)
         return True
     return False
+
+
+async def batch_delete_categories(category_ids: list[str]):
+     # 1. 一次性查出所有要删除的分类（用于获取图标路径和验证）
+    # 使用 $in 操作符
+    target_categories = await category_repo.query_categories(
+        CategoryCollection, 
+        {"_id": {"$in": [ObjectId(i) for i in category_ids]}}
+    )
+    
+    if len(target_categories) != len(category_ids):
+        raise HTTPException(status_code=404, detail="One or more categories not found")
+
+    # 2. 安全检查：排除“默认分类”
+    for cat in target_categories:
+        if cat.get('name') == "默认分类":
+            raise HTTPException(status_code=400, detail="Cannot delete Default category")
+
+    # 3. 获取“默认分类”的 ID（只需查一次）
+    default_category = await category_repo.query_category(CategoryCollection, {"name": "默认分类"})
+    if not default_category:
+        raise HTTPException(status_code=500, detail="Default category not initialized")
+    default_id = str(default_category['_id'])
+
+    # 4. 执行批量转移应用
+    await category_repo.move_ai_links_batch(AIHubCollection, category_ids, default_id)
+
+    # 5. 批量物理删除磁盘图标
+    for cat in target_categories:
+        icon_url = cat.get("icon_url")
+        if icon_url:
+            tool.remove_file(icon_url)
+
+    # 6. 批量删除分类记录
+    await category_repo.delete_categories(CategoryCollection, category_ids)
+
+    return f"Successfully deleted {len(category_ids)} categories"

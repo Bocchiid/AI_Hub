@@ -38,8 +38,14 @@ app.include_router(
     doubao_router,
     prefix='/doubao'
 )
-app.include_router(category_router)
-# app.include_router(ai_link_router)
+app.include_router(
+    category_router,
+    prefix='/category'
+)
+app.include_router(
+    ai_link_router,
+    prefix='/ai_link'
+)
 
 
 app.add_middleware(

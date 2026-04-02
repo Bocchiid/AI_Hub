@@ -42,7 +42,7 @@ async def delete_category(category_delete_request: category_schemas.CategoryDele
     """
     根据 _id 删除分类 (仅管理员)
     """
-    message = await category_model.delete_category(category_delete_request.mongo_id)
+    message = await category_model.batch_delete_categories([category_delete_request.mongo_id])
     return category_schemas.CategoryDeleteResponse(message=message)
 
 
@@ -130,3 +130,16 @@ async def get_category_by_name(category_name: str):
         message="Success",
         categories=categories
     )
+
+
+@router.post("/batch_delete", response_model=category_schemas.CategoryBatchDeleteResponse, dependencies=[Depends(admin_required)])
+async def batch_delete_categories(batch_delete_request: category_schemas.CategoryBatchDeleteRequest):
+    """
+    批量删除分类 (仅管理员)
+    """
+    # 1. 将字符串 ID 列表转换为 ObjectId 列表
+    category_ids = [str(id) for id in batch_delete_request.mongo_ids]
+    
+    # 2. 调用 Model 执行批量删除
+    message = await category_model.batch_delete_categories(category_ids)
+    return category_schemas.CategoryBatchDeleteResponse(message=message)

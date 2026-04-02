@@ -69,6 +69,34 @@ async def delete_ai_link(collection: AsyncIOMotorCollection,
     return result.deleted_count > 0
 
 
+async def delete_ai_links_batch(collection: AsyncIOMotorCollection, ids: list[str]):
+    """
+    批量删除 AI 链接
+    """
+    result = await collection.delete_many({"_id": {"$in": [ObjectId(i) for i in ids]}})
+    return result.deleted_count
+
+
+async def update_ai_link(collection: AsyncIOMotorCollection, _id: str, update_data: dict):
+    """
+    更新 AI 链接信息
+    """
+    await collection.update_one(
+        {"_id": ObjectId(_id)},
+        {"$set": update_data}
+    )
+
+
+async def batch_move_ai_links(collection: AsyncIOMotorCollection, ids: list[str], new_category_id: str):
+    """
+    批量移动 AI 链接到新分类
+    """
+    await collection.update_many(
+        {"_id": {"$in": [ObjectId(i) for i in ids]}},
+        {"$set": {"category_id": new_category_id}}
+    )
+
+
 async def query_ai_link_by_id(collection: AsyncIOMotorCollection,
                              _id: str):
     """
@@ -78,3 +106,33 @@ async def query_ai_link_by_id(collection: AsyncIOMotorCollection,
     if doc:
         doc['_id'] = str(doc['_id'])
     return doc
+
+
+async def query_ai_link_by_name(collection: AsyncIOMotorCollection, name: str, category_id: str):
+    """
+    根据名称和分类 ID 查询单个 AI 链接（用于查重）
+    """
+    doc = await collection.find_one({"name": name, "category_id": category_id})
+    if doc:
+        doc['_id'] = str(doc['_id'])
+    return doc
+
+
+async def query_ai_links_by_filter(collection: AsyncIOMotorCollection, filter_query: dict):
+    """
+    通用过滤查询 (在此处统一处理 ObjectId 转换)
+    """
+    query = filter_query.copy() if filter_query else {}
+    if "_id" in query and isinstance(query["_id"], str) and len(query["_id"]) == 24:
+        try:
+            from bson import ObjectId
+            query["_id"] = ObjectId(query["_id"])
+        except Exception:
+            pass
+
+    cursor = collection.find(query).sort('order', 1)
+    ls = []
+    async for doc in cursor:
+        doc['_id'] = str(doc['_id'])
+        ls.append(doc)
+    return ls

@@ -1,10 +1,12 @@
 # src/doubao/router.py
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile, Form
 from . import schemas as doubao_schemas
 from . import model as doubao_model
 from src.utils.auth import get_current_user_id
 from fastapi.responses import StreamingResponse
+import base64
+from typing import List, Optional
 
 
 router = APIRouter(
@@ -94,4 +96,33 @@ async def create_prompt_to_image_request(request_body: doubao_schemas.PromptToIm
     return doubao_schemas.PromptToImageResponse(
         img_urls = response,
         conversation_id = prompt_to_image_request.conversation_id if prompt_to_image_request.conversation_id else None
+    )
+
+
+# image to image without stream response
+@router.post("/image-to-image", response_model = doubao_schemas.ImageToImageResponse)
+async def create_image_to_image_request(prompt: str = Form(...),
+                                    images: List[UploadFile] = File(...),
+                                    conversation_id: Optional[str] = Form(None),
+                                    user_id: str = Depends(get_current_user_id)):
+    # 将上传的文件转换为 base64 字符串列表，以便传递给 model 层
+    base64_images = []
+    for image in images:
+        content = await image.read()
+        base64_str = base64.b64encode(content).decode("utf-8")
+        # 组装 Data URI
+        data_uri = f"data:{image.content_type};base64,{base64_str}"
+        base64_images.append(data_uri)
+
+    image_to_image_request = doubao_schemas.ImageToImageRequest(
+        prompt = prompt,
+        images = base64_images,
+        user_id = user_id,
+        conversation_id = conversation_id
+    )
+
+    response = await doubao_model.generate_image_to_image_response(image_to_image_request)
+    return doubao_schemas.ImageToImageResponse(
+        img_urls = response,
+        conversation_id = image_to_image_request.conversation_id if image_to_image_request.conversation_id else None
     )

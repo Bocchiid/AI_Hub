@@ -1,5 +1,6 @@
 # src/doubao/schemas.py
 
+from fastapi import Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 
@@ -64,6 +65,27 @@ class PromptToImageRequest(BaseModel):
 
 
 class PromptToImageResponse(BaseModel):
+    img_urls: List[str]
+    conversation_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ImageToImageRequestBody(BaseModel):
+    prompt: str
+    images: List[str]
+    conversation_id: Optional[str] = None
+
+
+class ImageToImageRequest(BaseModel):
+    prompt: str
+    images: List[str]
+    user_id: str
+    conversation_id: Optional[str] = None
+
+
+class ImageToImageResponse(BaseModel):
     img_urls: List[str]
     conversation_id: Optional[str] = None
 

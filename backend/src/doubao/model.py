@@ -238,3 +238,76 @@ async def generate_prompt_to_image_response(prompt_to_image_request: doubao_sche
                                           history_messages)
 
     return img_urls
+
+async def generate_image_to_image_response(image_to_image_request: doubao_schemas.ImageToImageRequest):
+    if not image_to_image_request.conversation_id:
+        image_to_image_request.conversation_id = obj()
+        title = await generate_chat_title(image_to_image_request.prompt)
+
+    doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection,
+                                                            image_to_image_request.user_id,
+                                                            image_to_image_request.conversation_id)
+    if doc:
+        doc_data = doc[0]
+        history_messages = doc_data.get('messages')
+        title = doc_data.get('title')
+    else:
+        history_messages = []
+
+    prompt = image_to_image_request.prompt
+    # 存入历史记录时，标记为图生图，并记录参考图
+    history_messages.append({
+        "role": "user", 
+        "content": f"[img2img: {', '.join(image_to_image_request.images)}] {prompt}"
+    })
+
+    # AI judge image count, max 4
+    judge_prompt = f"Please judge if the user wants multiple images. Output 'multi' or 'single'. User input: '{prompt}'"
+    
+    try:
+        judge_response = await client.chat.completions.create(
+            model = DOUBAO_MODEL,
+            messages = [{"role": "user", "content": judge_prompt}],
+            temperature = 0
+        )
+        decision = judge_response.choices[0].message.content.strip().lower()
+        n = 4 if 'multi' in decision else 1
+    except Exception as e:
+        print(f"AI Judge Failed: {e}")
+        n = 1
+
+    img_urls = []
+    # img2img sequential generation (SeeDream 2.0)
+    image_response = await client.images.generate(
+        model = DOUBAO_IMAGE_MODEL,
+        prompt = prompt,
+        size = "2K",
+        response_format = "url",
+        stream = True,
+        extra_body={
+            "image": image_to_image_request.images, 
+            "watermark": False,
+            "sequential_image_generation": "auto",
+            "sequential_image_generation_options": {
+                "max_images": n
+            },
+        },
+    )
+    async for event in image_response:
+        if event and event.type == "image_generation.partial_succeeded":
+            if event.url:
+                img_urls.append(event.url)
+
+    # Save to history
+    reply_content = "\n".join(img_urls)
+    history_messages.append({
+        "role": "assistant", "content": reply_content
+    })
+
+    await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
+                                          image_to_image_request.user_id,
+                                          image_to_image_request.conversation_id,
+                                          title,
+                                          history_messages)
+
+    return img_urls

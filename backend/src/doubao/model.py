@@ -76,20 +76,25 @@ async def generate_plain_chat_response(request: doubao_schemas.ChatRequest):
 
 
 async def generate_stream_chat_response(request: doubao_schemas.ChatRequest,
-                                        system_prompt: str):
-    if not request.conversation_id:
-        request.conversation_id = obj()
-        title = await generate_chat_title(request.prompt)
+                                        system_prompt: str,
+                                        save_history: bool = True):
+    if save_history:
+        if not request.conversation_id:
+            request.conversation_id = obj()
+            title = await generate_chat_title(request.prompt)
 
-    doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection,
-                                               request.user_id,
-                                               request.conversation_id)
-    if doc:
-        doc_data = doc[0]
-        history_messages = doc_data.get('messages')
-        title = doc_data.get('title')
+        doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection,
+                                                request.user_id,
+                                                request.conversation_id)
+        if doc:
+            doc_data = doc[0]
+            history_messages = doc_data.get('messages')
+            title = doc_data.get('title')
+        else:
+            history_messages = []
     else:
         history_messages = []
+        
     history_messages.append({"role": "user", "content": request.prompt})
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -113,17 +118,18 @@ async def generate_stream_chat_response(request: doubao_schemas.ChatRequest,
 
                 yield f"data: {content}\n\n"
 
-        history_messages.append({
-            "role": "assistant", "content": reply
-        })
+        if save_history:
+            history_messages.append({
+                "role": "assistant", "content": reply
+            })
 
-        await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
-                                              request.user_id,
-                                              request.conversation_id,
-                                              title,
-                                              history_messages)
+            await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
+                                                request.user_id,
+                                                request.conversation_id,
+                                                title,
+                                                history_messages)
 
-    return stream_response(), request.conversation_id
+    return stream_response(), request.conversation_id if save_history else None
 
 
 async def get_chat_history_list(chat_history_list_request: doubao_schemas.ChatHistoryListQuery):
@@ -241,25 +247,30 @@ async def generate_prompt_to_image_response(prompt_to_image_request: doubao_sche
 
     return img_urls
 
-async def generate_image_to_image_response(image_to_image_request: doubao_schemas.ImageToImageRequest):
-    if not image_to_image_request.conversation_id:
-        image_to_image_request.conversation_id = obj()
-        title = await generate_chat_title(image_to_image_request.prompt)
+async def generate_image_to_image_response(image_to_image_request: doubao_schemas.ImageToImageRequest, save_history: bool = True):
+    if save_history:
+        if not image_to_image_request.conversation_id:
+            image_to_image_request.conversation_id = obj()
+            title = await generate_chat_title(image_to_image_request.prompt)
 
-    doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection, image_to_image_request.user_id, image_to_image_request.conversation_id)
-    if doc:
-        doc_data = doc[0]
-        history_messages = doc_data.get('messages')
-        title = doc_data.get('title')
+        doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection, image_to_image_request.user_id, image_to_image_request.conversation_id)
+        if doc:
+            doc_data = doc[0]
+            history_messages = doc_data.get('messages')
+            title = doc_data.get('title')
+        else:
+            history_messages = []
     else:
         history_messages = []
 
     prompt = image_to_image_request.prompt
-    # 存入历史记录时，标记为图生图，并记录参考图数量
-    history_messages.append({
-        "role": "user", 
-        "content": f"[img2img: {len(image_to_image_request.images)} refs] {prompt}"
-    })
+    
+    if save_history:
+        # 存入历史记录时，标记为图生图，并记录参考图数量
+        history_messages.append({
+            "role": "user", 
+            "content": f"[img2img: {len(image_to_image_request.images)} refs] {prompt}"
+        })
 
     # AI 决策逻辑：判断用户是否想要多张输出
     judge_prompt = f"请判断用户的输入是否包含生成多张、几张、批量、几份或明确张数（大于1）的要求。注意：单次生成最多支持 4 张图。如果是多图需求，仅输出 'multi'；否则仅输出 'single'。用户输入：'{prompt}'"
@@ -331,14 +342,15 @@ async def generate_image_to_image_response(image_to_image_request: doubao_schema
     # 存入历史记录时，将URL以换行符连接
     reply_content = "\n".join(img_urls)
 
-    history_messages.append({
-        "role": "assistant", "content": reply_content
-    })
+    if save_history:
+        history_messages.append({
+            "role": "assistant", "content": reply_content
+        })
 
-    await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
-                                          image_to_image_request.user_id,
-                                          image_to_image_request.conversation_id,
-                                          title,
-                                          history_messages)
+        await aichat_repo.upsert_chat_history(DoubaoChatHistoryCollection,
+                                            image_to_image_request.user_id,
+                                            image_to_image_request.conversation_id,
+                                            title,
+                                            history_messages)
 
     return img_urls

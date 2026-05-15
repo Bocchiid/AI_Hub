@@ -1,0 +1,22 @@
+# 忽略 Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 忽略环境文件夹
+venv/
+.env
+
+# 忽略本地静态资源 (生产环境通常会挂载卷，不应打包进镜像)
+static/experience/*
+static/covers/*
+static/presets/*
+
+# 忽略日志
+logs/
+*.log
+
+# 忽略 IDE 配置
+.vscode/
+.idea/
+.git/

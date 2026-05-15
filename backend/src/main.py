@@ -8,6 +8,7 @@ from .deepseek.router import router as deepseek_router
 from .doubao.router import router as doubao_router
 from .category.router import router as category_router
 from .ai_link.router import router as ai_link_router
+from .ai_experience.router import router as ai_exp_router
 from .category.model import init_default_category
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +46,10 @@ app.include_router(
 app.include_router(
     ai_link_router,
     prefix='/ai_link'
+)
+app.include_router(
+    ai_exp_router,
+    prefix='/ai_experience'
 )
 
 

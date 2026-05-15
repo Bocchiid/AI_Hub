@@ -1,0 +1,35 @@
+services:
+  # 1. MongoDB 数据库服务
+  mongodb:
+    image: mongo:latest
+    container_name: ai_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      # 如果需要设置密码，可以在这里配置
+      # MONGO_INITDB_ROOT_USERNAME: admin
+      # MONGO_INITDB_ROOT_PASSWORD: password123
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./mongodb_data:/data/db # 将数据库文件持久化到本地目录
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro # 注入初始脚本
+
+  # 2. FastAPI 后端服务
+  backend:
+    build: .
+    container_name: ai_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      # 这里配置 MongoDB 的连接地址
+      # 注意：在 Docker 网络中，主机名直接用服务名 "mongodb"
+      - MONGODB_URL=mongodb://mongodb:27017
+      - TZ=Asia/Shanghai
+      # 如果你有其他环境变量（如 API KEY），也可以写在这里
+      # - DOUBAO_API_KEY=your_key_here
+    volumes:
+      - ./static:/app/static # 挂载静态资源，保证图片不丢失
+    depends_on:
+      - mongodb # 确保数据库先启动

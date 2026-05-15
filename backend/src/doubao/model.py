@@ -9,6 +9,8 @@ from src.utils.tool import obj
 from openai import AsyncOpenAI
 
 
+import os
+
 DoubaoChatHistoryCollection = db["DoubaoChatHistory"]
 
 client = AsyncOpenAI(
@@ -244,9 +246,7 @@ async def generate_image_to_image_response(image_to_image_request: doubao_schema
         image_to_image_request.conversation_id = obj()
         title = await generate_chat_title(image_to_image_request.prompt)
 
-    doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection,
-                                                            image_to_image_request.user_id,
-                                                            image_to_image_request.conversation_id)
+    doc = await aichat_repo.query_chat_history(DoubaoChatHistoryCollection, image_to_image_request.user_id, image_to_image_request.conversation_id)
     if doc:
         doc_data = doc[0]
         history_messages = doc_data.get('messages')
@@ -255,14 +255,14 @@ async def generate_image_to_image_response(image_to_image_request: doubao_schema
         history_messages = []
 
     prompt = image_to_image_request.prompt
-    # 存入历史记录时，标记为图生图，并记录参考图
+    # 存入历史记录时，标记为图生图，并记录参考图数量
     history_messages.append({
         "role": "user", 
-        "content": f"[img2img: {', '.join(image_to_image_request.images)}] {prompt}"
+        "content": f"[img2img: {len(image_to_image_request.images)} refs] {prompt}"
     })
 
-    # AI judge image count, max 4
-    judge_prompt = f"Please judge if the user wants multiple images. Output 'multi' or 'single'. User input: '{prompt}'"
+    # AI 决策逻辑：判断用户是否想要多张输出
+    judge_prompt = f"请判断用户的输入是否包含生成多张、几张、批量、几份或明确张数（大于1）的要求。注意：单次生成最多支持 4 张图。如果是多图需求，仅输出 'multi'；否则仅输出 'single'。用户输入：'{prompt}'"
     
     try:
         judge_response = await client.chat.completions.create(
@@ -271,35 +271,66 @@ async def generate_image_to_image_response(image_to_image_request: doubao_schema
             temperature = 0
         )
         decision = judge_response.choices[0].message.content.strip().lower()
+        # 默认 1 张，识别到 'multi' 则生成 4 张
         n = 4 if 'multi' in decision else 1
     except Exception as e:
-        print(f"AI Judge Failed: {e}")
-        n = 1
+        print(f"AI 判断失败: {e}")
+        # 降级关键词判断
+        multi_keywords = ["多图", "几张", "多张", "4张", "批量", "一些"]
+        n = 4 if any(k in prompt for k in multi_keywords) else 1
 
     img_urls = []
-    # img2img sequential generation (SeeDream 2.0)
-    image_response = await client.images.generate(
-        model = DOUBAO_IMAGE_MODEL,
-        prompt = prompt,
-        size = "2K",
-        response_format = "url",
-        stream = True,
-        extra_body={
-            "image": image_to_image_request.images, 
-            "watermark": False,
-            "sequential_image_generation": "auto",
-            "sequential_image_generation_options": {
-                "max_images": n
-            },
-        },
-    )
-    async for event in image_response:
-        if event and event.type == "image_generation.partial_succeeded":
-            if event.url:
-                img_urls.append(event.url)
+    try:
+        # 直接使用 request 中传过来的 Base64 列表
+        ref_images_base64 = image_to_image_request.images
 
-    # Save to history
+        # 调用豆包 Image-to-Image API
+        if n > 1:
+            # 多图生成逻辑 (利用 SeeDream 2.0 的串联/流式生成能力)
+            image_response = await client.images.generate(
+                model = DOUBAO_IMAGE_MODEL,
+                prompt = prompt,
+                size = "2K",
+                response_format = "url",
+                stream = True,
+                extra_body={
+                    "ref_id": ref_images_base64,
+                    "watermark": False,
+                    "sequential_image_generation": "auto",
+                    "sequential_image_generation_options": {
+                        "max_images": n
+                    },
+                },
+            )
+            async for event in image_response:
+                if event and event.type == "image_generation.partial_succeeded":
+                    if event.url:
+                        img_urls.append(event.url)
+        else:
+            # 默认单图生成逻辑
+            single_res = await client.images.generate(
+                model = DOUBAO_IMAGE_MODEL,
+                prompt = prompt,
+                size = "2K",
+                n = 1,
+                response_format = "url",
+                extra_body={
+                    "ref_id": ref_images_base64,
+                    "watermark": False,
+                },
+            )
+            img_urls = [data.url for data in single_res.data]
+
+    except Exception as e:
+        print(f"图生图失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Image-to-Image generation failed: {str(e)}"
+        )
+    
+    # 存入历史记录时，将URL以换行符连接
     reply_content = "\n".join(img_urls)
+
     history_messages.append({
         "role": "assistant", "content": reply_content
     })

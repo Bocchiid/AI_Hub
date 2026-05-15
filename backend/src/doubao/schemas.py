@@ -1,7 +1,7 @@
 # src/doubao/schemas.py
 
-from fastapi import Form
-from pydantic import BaseModel
+from fastapi import Form, UploadFile, File
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict
 
 
@@ -73,14 +73,15 @@ class PromptToImageResponse(BaseModel):
 
 
 class ImageToImageRequestBody(BaseModel):
-    prompt: str
-    images: List[str]
-    conversation_id: Optional[str] = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    prompt: str = Form(...)
+    images: List[UploadFile] = File(...)
+    conversation_id: Optional[str] = Form(None)
 
 
 class ImageToImageRequest(BaseModel):
     prompt: str
-    images: List[str]
+    images: List[str] # 这里的 images 存储的是上传文件的 Base64 字符串
     user_id: str
     conversation_id: Optional[str] = None
 
